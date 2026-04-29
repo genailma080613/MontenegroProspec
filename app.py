@@ -1,94 +1,139 @@
 import streamlit as st
-import pandas as pd
 from groq import Groq
-from pypdf import PdfReader, PdfWriter
+import plotly.graph_objects as go 
+import pandas as pd
+from reportlab.lib.pagesizes import A4
 from reportlab.pdfgen import canvas
 import io
-import urllib.parse
 
-# 1. Configuração e Estilo
-st.set_page_config(page_title="Montenegro Prospec", page_icon="🇲🇪", layout="wide")
+# 1. CONFIGURAÇÃO DE PÁGINA
+st.set_page_config(page_title="MONTENEGROPROSPEC", page_icon="🇲🇪", layout="wide")
 
+# 2. ESTILO VISUAL (CORREÇÃO DE LEGIBILIDADE E CONTRASTE)
 st.markdown("""
     <style>
-    @import url('https://fonts.googleapis.com/css2?family=Inter:wght@400;600;700&display=swap');
-    @import url('https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.0.0/css/all.min.css');
-    html, body, [class*="css"] { font-family: 'Inter', sans-serif !important; }
-    .stApp { background: radial-gradient(circle at 10% 20%, #1a2a6c 0%, #2a4858 40%, #ffffff 100%); background-attachment: fixed; }
-    .main .block-container { background-color: white; padding: 40px; border-radius: 20px; box-shadow: 0 15px 35px rgba(0,0,0,0.1); }
-    .section-title { color: #1a2a6c; font-weight: 700; border-left: 6px solid #1a2a6c; padding-left: 20px; margin-bottom: 30px; text-transform: uppercase; }
-    .metric-card { background: #f9f9f9; padding: 25px; border-radius: 16px; border-bottom: 5px solid #1a2a6c; }
-    .btn-share { display: inline-flex; align-items: center; justify-content: center; padding: 12px; border-radius: 8px; text-decoration: none; color: white !important; font-weight: 600; width: 100%; margin-top: 10px; }
-    .btn-wa { background-color: #25d366; } .btn-mail { background-color: #1a2a6c; }
+    .stApp {
+        background-color: #ffffff; /* Fundo branco sólido para garantir leitura */
+    }
+    /* Força cor PRETA em todos os textos para máxima visibilidade */
+    h1, h2, h3, p, label, .stMetric, .stSelectbox div, span { 
+        color: #000000 !important; 
+        font-weight: 800 !important; 
+    }
+    .stSidebar { background-color: #f1f5f9; border-right: 1px solid #cbd5e1; }
+    .footer {
+        text-align: center; padding: 20px; color: #000000; font-weight: bold;
+    }
     </style>
     """, unsafe_allow_html=True)
 
-# --- IDIOMAS ---
-languages = {
-    "Português": {"nav": "Navegação", "roi": "Dashboard ROI", "legal": "Scanner de Matrículas", "visto": "Visto & Residência", "val": "Valor do Ativo (€)", "alg": "Aluguel Mensal (€)", "total": "Investimento Total", "grafico": "Comparativo: Investimento vs Lucro/Ano"},
-    "Español": {"nav": "Navegación", "roi": "Dashboard ROI", "legal": "Escáner de Títulos", "visto": "Visa y Residencia", "val": "Valor del Activo (€)", "alg": "Alquiler Mensual (€)", "total": "Inversión Total", "grafico": "Comparativo: Inversión vs Lucro/Año"},
-    "Crnogorski": {"nav": "Navigacija", "roi": "ROI Dashboard", "legal": "Scanner Nepokretnosti", "visto": "Viza i Boravak", "val": "Vrijednost (€)", "alg": "Mjesečna kirija (€)", "total": "Ukupna investicija", "grafico": "Poređenje: Investicija naspram Dobiti/Godišnje"}
-}
+# Função para Gerar PDF
+def gerar_pdf(conteudo, titulo="Relatório Técnico"):
+    buffer = io.BytesIO()
+    c = canvas.Canvas(buffer, pagesize=A4)
+    c.setFont("Helvetica-Bold", 16)
+    c.drawString(50, 800, "MONTENEGROPROSPEC - Parecer Técnico")
+    c.setFont("Helvetica", 12)
+    c.drawString(50, 780, f"Título: {titulo}")
+    text_object = c.beginText(50, 750)
+    text_object.setFont("Helvetica", 10)
+    linhas = conteudo.split('\n')
+    for line in linhas:
+        text_object.textLine(line[:100])
+    c.drawText(text_object)
+    c.showPage()
+    c.save()
+    buffer.seek(0)
+    return buffer
 
-if "auth" not in st.session_state: st.session_state.auth = False
-if not st.session_state.auth:
-    st.markdown("<h2 style='text-align:center; color:white;'>🇲🇪 MONTENEGRO PROSPEC</h2>", unsafe_allow_html=True)
-    senha = st.text_input("Credencial", type="password")
-    if st.button("Acessar"):
-        if senha == st.secrets["PASSWORD"]: st.session_state.auth = True; st.rerun()
-else:
-    st.sidebar.markdown("### <i class='fas fa-globe'></i> Idioma")
-    sel_lang = st.sidebar.selectbox("", list(languages.keys()))
-    t = languages[sel_lang]
-    st.sidebar.markdown("---")
-    menu = st.sidebar.radio(t["nav"], [t["roi"], t["legal"], t["visto"], "📤 Exportar Relatório"])
+# 3. SISTEMA DE LOGIN
+def check_password():
+    if "auth" not in st.session_state: st.session_state["auth"] = False
+    if st.session_state["auth"]: return True
+    st.markdown("<h2 style='text-align: center;'>Acesso Restrito</h2>", unsafe_allow_html=True)
+    col1, col2, col3 = st.columns([1,1.5,1])
+    with col2:
+        pwd = st.text_input("Chave de Acesso Master", type="password")
+        if st.button("Autenticar"):
+            correct_pwd = st.secrets.get("PASSWORD", "mne2026")
+            if pwd == correct_pwd:
+                st.session_state["auth"] = True
+                st.rerun()
+            else: st.error("Credencial inválida.")
+    return False
 
-    if menu == t["roi"]:
-        st.markdown(f"<div class='section-title'>{t['roi']}</div>", unsafe_allow_html=True)
-        c1, col_form = st.columns([1, 1])
-        with c1:
-            v_aq = st.number_input(t["val"], value=250000.0)
-            a_men = st.number_input(t["alg"], value=1200.0)
-        
-        total = v_aq + (v_aq * 0.03) + 1500
-        lucro_anual = a_men * 12
-        roi = (lucro_anual / total) * 100
-        st.session_state.dados = {"total": total, "roi": roi, "lucro": lucro_anual}
+if not check_password(): st.stop()
 
-        st.markdown("<br>", unsafe_allow_html=True)
-        m1, m2, m3 = st.columns(3)
-        with m1: st.markdown(f"<div class='metric-card'><b>{t['total']}</b><h2>€ {total:,.2f}</h2></div>", unsafe_allow_html=True)
-        with m2: st.markdown(f"<div class='metric-card'><b>Renda Anual</b><h2>€ {lucro_anual:,.2f}</h2></div>", unsafe_allow_html=True)
-        with m3: st.markdown(f"<div class='metric-card' style='border-color:#28a745'><b>ROI</b><h2 style='color:#28a745'>{roi:.2f}%</h2></div>", unsafe_allow_html=True)
+# 4. INICIALIZAÇÃO DA IA
+try:
+    api_key = st.secrets.get("GROQ_API_KEY")
+    client = Groq(api_key=api_key)
+except:
+    st.error("Configure a chave GROQ_API_KEY nos Secrets.")
 
-        # --- GRÁFICO EM TEMPO REAL (RESTAURADO) ---
-        st.markdown(f"#### {t['grafico']}")
-        chart_data = pd.DataFrame({
-            "Valores": [total, lucro_anual],
-            "Categoria": ["Investimento Total", "Lucro Bruto Anual"]
-        }).set_index("Categoria")
-        st.bar_chart(chart_data)
+# 5. SIDEBAR (LIMPA E PROFISSIONAL)
+st.sidebar.title("MONTENEGROPROSPEC")
+st.sidebar.write("Idioma: Português")
+st.sidebar.write(f"Operador: **Genailma Couto**")
+st.sidebar.markdown("---")
+menu = st.sidebar.radio("MENU", ["Análise de ROI", "Due Diligence Jurídica", "Visto & Residência", "Business Intelligence", "Relatórios Oficiais"])
 
-    elif menu == t["legal"]:
-        st.markdown(f"<div class='section-title'>{t['legal']}</div>", unsafe_allow_html=True)
-        doc_text = st.text_area("Texto em Sérvio (List Nepokretnosti):", height=200)
-        if st.button("Analisar Ônus"):
-            client = Groq(api_key=st.secrets["GROQ_API_KEY"])
-            chat = client.chat.completions.create(model="llama3-8b-8192", messages=[{"role": "user", "content": f"Analise: {doc_text}"}])
-            st.write(chat.choices[0].message.content)
+if st.sidebar.button("Sair"):
+    st.session_state["auth"] = False
+    st.rerun()
 
-    elif menu == "📤 Exportar Relatório":
-        st.markdown("<div class='section-title'>Exportação Segura</div>", unsafe_allow_html=True)
-        senha_pdf = st.text_input("Senha PDF", value=st.secrets["PASSWORD"], type="password")
-        if st.button("Gerar PDF"):
-            packet = io.BytesIO(); can = canvas.Canvas(packet); can.drawString(100, 800, f"ROI: {st.session_state.dados['roi']:.2f}%"); can.save()
-            packet.seek(0); reader = PdfReader(packet); writer = PdfWriter(); writer.add_page(reader.pages[0]); writer.encrypt(senha_pdf)
-            output = io.BytesIO(); writer.write(output); st.session_state.pdf_ready = output.getvalue(); st.success("PDF Pronto!")
-        
-        if "pdf_ready" in st.session_state:
-            st.download_button("Baixar PDF", st.session_state.pdf_ready, "prospec.pdf")
-            msg = urllib.parse.quote(f"Resumo Montenegro: ROI de {st.session_state.dados['roi']:.2f}%")
-            st.markdown(f'<a href="https://wa.me/?text={msg}" class="btn-share btn-wa">WhatsApp</a>', unsafe_allow_html=True)
-            st.markdown(f'<a href="mailto:?body={msg}" class="btn-share btn-mail">E-mail</a>', unsafe_allow_html=True)
+# 6. CONTEÚDO
+if menu == "Análise de ROI":
+    st.title("📊 Análise de ROI em Tempo Real")
+    v = st.number_input("Valor do Imóvel (€)", value=150000.0)
+    imp = v * 0.03 if v <= 150000 else (4500 + (v-150000)*0.05)
+    st.metric("Estimativa de Custo Total", f"€ {v + imp + 1500:,.2f}")
+    
+    df = pd.DataFrame({'Mês': ['Jan', 'Fev', 'Mar', 'Abr'], 'Valor': [2800, 2850, 2900, 3050]})
+    fig = go.Figure(go.Scatter(x=df['Mês'], y=df['Valor'], mode='lines+markers', line=dict(color='#10b981', width=3)))
+    fig.update_layout(title="Tendência de Valorização m²", paper_bgcolor='rgba(0,0,0,0)', plot_bgcolor='rgba(0,0,0,0)')
+    st.plotly_chart(fig, use_container_width=True)
 
-    if st.sidebar.button("Sair"): st.session_state.auth = False; st.rerun()
+elif menu == "Due Diligence Jurídica":
+    st.title("⚖️ Due Diligence Jurídica")
+    doc = st.text_area("Texto do List Nepokretnosti (Matrícula):", height=250)
+    if st.button("Executar Auditoria IA"):
+        if doc.strip():
+            with st.spinner("Analisando gravames..."):
+                res = client.chat.completions.create(
+                    messages=[{"role": "user", "content": f"Realize análise técnica e jurídica deste imóvel em Montenegro: {doc}"}],
+                    model="llama-3.1-8b-instant"
+                )
+                st.session_state['ultima_analise'] = res.choices[0].message.content
+                st.info("Resultado da Análise:")
+                st.markdown(st.session_state['ultima_analise'])
+        else:
+            st.warning("Por favor, cole o texto antes de analisar.")
+
+elif menu == "Visto & Residência":
+    st.title("🇲🇪 Protocolos de Residência")
+    servico = st.selectbox("Selecione o Serviço:", ["Visto de Nômade Digital", "Cidadania por Investimento", "Abertura de Empresa (DOO)", "Compra de Imóveis"])
+    
+    if servico == "Compra de Imóveis":
+        st.subheader("Aquisição e Direito à Residência")
+        st.write("Qualquer imóvel edificado em Montenegro dá direito ao pedido de residência temporária.")
+        st.info("Requisito: List Nepokretnosti sem ônus (Cista Svojina).")
+    else:
+        st.info(f"Módulo de {servico} configurado para as diretrizes de 2026.")
+
+elif menu == "Business Intelligence":
+    st.title("📈 Business Intelligence")
+    st.write("Análise de Mercado e Demandas")
+    dados_bi = pd.DataFrame({'Região': ['Budva', 'Tivat', 'Kotor'], 'ROI %': [7.5, 8.2, 6.9]})
+    st.bar_chart(dados_bi.set_index('Região'))
+
+elif menu == "Relatórios Oficiais":
+    st.title("📄 Geração de Parecer Técnico")
+    if 'ultima_analise' in st.session_state:
+        pdf_data = gerar_pdf(st.session_state['ultima_analise'])
+        st.download_button(label="📥 Baixar Relatório PDF", data=pdf_data, file_name="parecer_montenegro.pdf", mime="application/pdf")
+    else:
+        st.warning("Realize a Due Diligence primeiro.")
+
+# 7. RODAPÉ
+st.markdown(f'<div class="footer">MONTENEGROPROSPEC | Desenvolvido por Genailma de Oliveira Couto • 2026</div>', unsafe_allow_html=True)
